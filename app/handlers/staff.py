@@ -15,10 +15,13 @@ from app.keyboards.menus import (
     staff_list_keyboard,
 )
 from app.services.access import can_manage_directory, can_manage_managers
-from app.services.parse_user import parse_max_user_ref
+from app.services.parse_user import user_ref_from_message
 from app.states import StaffAdd, StaffEdit
 
 router = Router("staff")
+
+_REF_PROMPT = "Пришлите числовой user_id или перешлите сообщение этого человека."
+_REF_FAIL = "Не вижу user_id. Пришлите число или перешлите сообщение человека."
 
 
 def _nav_kb(back_payload: str) -> InlineKeyboardBuilder:
@@ -86,7 +89,7 @@ async def cb_staff_add(event: MessageCallback, context: MemoryContext):
     await context.update_data(role=target_role)
     await edit_or_answer(
         event,
-        "Отправьте ссылку на человека в MAX или его user_id.",
+        _REF_PROMPT,
         _nav_kb(f"staff:list:{target_role}:0"),
     )
 
@@ -100,13 +103,12 @@ async def cb_staff_add_back_list(event: MessageCallback, context: MemoryContext)
 
 @router.message_created(StaffAdd.link)
 async def staff_add_link(event: MessageCreated, context: MemoryContext):
-    text = (event.message.body.text if event.message.body else "") or ""
-    user_id, link = parse_max_user_ref(text)
+    user_id, link = user_ref_from_message(event.message)
     data = await context.get_data()
     role = data.get("role", "guard")
     if not user_id:
         await event.message.answer(
-            "Не удалось извлечь user_id. Пришлите числовой id или ссылку с id.",
+            _REF_FAIL,
             attachments=[_nav_kb(f"staff:list:{role}:0").as_markup()],
         )
         return
@@ -126,7 +128,7 @@ async def staff_back_link(event: MessageCallback, context: MemoryContext):
     await context.set_state(StaffAdd.link)
     await edit_or_answer(
         event,
-        "Отправьте ссылку на человека в MAX или его user_id.",
+        _REF_PROMPT,
         _nav_kb(f"staff:list:{role}:0"),
     )
 
@@ -335,7 +337,7 @@ async def cb_staff_edit(event: MessageCallback, context: MemoryContext):
 
     await context.set_state(StaffEdit.value)
     await context.update_data(staff_id=staff_id, field=field, role=role)
-    prompt = "Новая ссылка / user_id:" if field == "link" else "Новое имя:"
+    prompt = _REF_PROMPT if field == "link" else "Новое имя:"
     await edit_or_answer(event, prompt, _nav_kb(f"staff:view:{staff_id}"))
 
 
@@ -389,11 +391,11 @@ async def staff_edit_value(event: MessageCreated, context: MemoryContext):
                 return
             repo.update_staff_field(staff_id, name=text)
         elif field == "link":
-            uid, link = parse_max_user_ref(text)
-            if uid:
-                repo.update_staff_field(staff_id, user_id=uid, max_link=link)
-            else:
-                repo.update_staff_field(staff_id, max_link=text)
+            uid, link = user_ref_from_message(event.message)
+            if not uid:
+                await event.message.answer(_REF_FAIL)
+                return
+            repo.update_staff_field(staff_id, user_id=uid, max_link=link)
         staff = repo.get_staff_by_id(staff_id)
         body = staff_card_text(staff)
         role = staff.role
