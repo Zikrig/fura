@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Select, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from app.db.models import Entry, Plot, Price, Settlement, Staff, Vehicle
+from app.db.models import Entry, Price, Settlement, Staff, Vehicle
 
 
 class Repo:
@@ -19,7 +19,7 @@ class Repo:
     def get_staff_by_id(self, staff_id: int) -> Staff | None:
         return self.session.scalar(
             select(Staff)
-            .options(joinedload(Staff.settlement), joinedload(Staff.plot))
+            .options(joinedload(Staff.settlement))
             .where(Staff.id == staff_id)
         )
 
@@ -27,7 +27,7 @@ class Repo:
         return list(
             self.session.scalars(
                 select(Staff)
-                .options(joinedload(Staff.settlement), joinedload(Staff.plot))
+                .options(joinedload(Staff.settlement))
                 .where(Staff.role == role)
                 .order_by(Staff.name.asc())
             ).unique()
@@ -41,7 +41,6 @@ class Repo:
         name: str,
         max_link: str,
         settlement_id: int,
-        plot_id: int,
     ) -> Staff:
         existing = self.get_staff(user_id)
         if existing:
@@ -49,7 +48,6 @@ class Repo:
             existing.name = name
             existing.max_link = max_link
             existing.settlement_id = settlement_id
-            existing.plot_id = plot_id
             self.session.flush()
             return existing
         row = Staff(
@@ -58,7 +56,6 @@ class Repo:
             name=name,
             max_link=max_link,
             settlement_id=settlement_id,
-            plot_id=plot_id,
         )
         self.session.add(row)
         self.session.flush()
@@ -119,58 +116,6 @@ class Repo:
         self.session.delete(row)
         self.session.flush()
         return True
-
-    # ----- plots -----
-    def list_plots(self, settlement_id: int | None = None) -> list[Plot]:
-        stmt: Select = (
-            select(Plot)
-            .options(joinedload(Plot.settlement))
-            .order_by(Plot.name.asc())
-        )
-        if settlement_id is not None:
-            stmt = stmt.where(Plot.settlement_id == settlement_id)
-        return list(self.session.scalars(stmt).unique())
-
-    def get_plot(self, plot_id: int) -> Plot | None:
-        return self.session.scalar(
-            select(Plot).options(joinedload(Plot.settlement)).where(Plot.id == plot_id)
-        )
-
-    def get_plot_by_name(self, settlement_id: int, name: str) -> Plot | None:
-        return self.session.scalar(
-            select(Plot).where(Plot.settlement_id == settlement_id, Plot.name == name)
-        )
-
-    def add_plot(self, settlement_id: int, name: str) -> Plot:
-        row = Plot(settlement_id=settlement_id, name=name.strip())
-        self.session.add(row)
-        self.session.flush()
-        return row
-
-    def rename_plot(self, plot_id: int, name: str) -> Plot | None:
-        row = self.get_plot(plot_id)
-        if not row:
-            return None
-        row.name = name.strip()
-        self.session.flush()
-        return row
-
-    def delete_plot(self, plot_id: int) -> bool:
-        row = self.get_plot(plot_id)
-        if not row:
-            return False
-        self.session.delete(row)
-        self.session.flush()
-        return True
-
-    def ensure_plot(self, settlement_name: str, plot_name: str) -> Plot:
-        settlement = self.get_settlement_by_name(settlement_name)
-        if not settlement:
-            settlement = self.add_settlement(settlement_name)
-        plot = self.get_plot_by_name(settlement.id, plot_name)
-        if not plot:
-            plot = self.add_plot(settlement.id, plot_name)
-        return plot
 
     # ----- vehicles -----
     def list_vehicles(self) -> list[Vehicle]:
@@ -239,7 +184,8 @@ class Repo:
         self,
         *,
         created_at: datetime,
-        plot_id: int,
+        settlement_id: int,
+        plot_name: str,
         vehicle_id: int,
         price_amount: float,
         photo_path: str,
@@ -247,7 +193,8 @@ class Repo:
     ) -> Entry:
         row = Entry(
             created_at=created_at,
-            plot_id=plot_id,
+            settlement_id=settlement_id,
+            plot_name=plot_name.strip(),
             vehicle_id=vehicle_id,
             price_amount=float(price_amount),
             photo_path=photo_path,
@@ -267,7 +214,7 @@ class Repo:
         stmt = (
             select(Entry)
             .options(
-                joinedload(Entry.plot).joinedload(Plot.settlement),
+                joinedload(Entry.settlement),
                 joinedload(Entry.vehicle),
             )
             .order_by(Entry.created_at.asc())
@@ -277,7 +224,5 @@ class Repo:
         if date_to is not None:
             stmt = stmt.where(Entry.created_at < date_to)
         if settlement_id is not None:
-            stmt = stmt.join(Plot, Entry.plot_id == Plot.id).where(
-                Plot.settlement_id == settlement_id
-            )
+            stmt = stmt.where(Entry.settlement_id == settlement_id)
         return list(self.session.scalars(stmt).unique())

@@ -87,12 +87,10 @@ async def send_file_to_user(bot, user_id: int, path, caption: str = "") -> None:
 
 def staff_card_text(staff) -> str:
     sett = staff.settlement.name if staff.settlement else "—"
-    plot = staff.plot.name if staff.plot else "—"
     role_label = "Менеджер" if staff.role == "manager" else "Охранник"
     return (
         f"{role_label}: {staff.name}\n"
         f"user_id: {staff.user_id}\n"
         f"Ссылка: {staff.max_link or '—'}\n"
-        f"Поселок: {sett}\n"
-        f"Участок: {plot}"
+        f"Поселок: {sett}"
     )

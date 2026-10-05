@@ -69,6 +69,66 @@ def _migrate_prices_to_settlements() -> None:
         conn.execute(text("ALTER TABLE prices_new RENAME TO prices"))
 
 
+def _migrate_entries_plot_name() -> None:
+    """Участок въезда — строка, не запись из справочника."""
+    insp = inspect(engine)
+    if "entries" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("entries")}
+    if "plot_id" not in cols:
+        return
+    plots_exist = "plots" in insp.get_table_names()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE entries_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at DATETIME NOT NULL,
+                    settlement_id INTEGER,
+                    plot_name TEXT NOT NULL DEFAULT '',
+                    vehicle_id INTEGER NOT NULL,
+                    price_amount FLOAT NOT NULL DEFAULT 0.0,
+                    photo_path TEXT NOT NULL,
+                    reporter_user_id INTEGER NOT NULL,
+                    CONSTRAINT fk_entries_settlement FOREIGN KEY (settlement_id) REFERENCES settlements(id) ON DELETE SET NULL,
+                    CONSTRAINT fk_entries_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE RESTRICT
+                )
+                """
+            )
+        )
+        if plots_exist:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO entries_new (
+                        created_at, settlement_id, plot_name, vehicle_id, price_amount, photo_path, reporter_user_id
+                    )
+                    SELECT e.created_at, pl.settlement_id, COALESCE(pl.name, ''), e.vehicle_id,
+                           e.price_amount, e.photo_path, e.reporter_user_id
+                    FROM entries AS e
+                    LEFT JOIN plots AS pl ON pl.id = e.plot_id
+                    """
+                )
+            )
+        else:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO entries_new (
+                        created_at, settlement_id, plot_name, vehicle_id, price_amount, photo_path, reporter_user_id
+                    )
+                    SELECT created_at, NULL, '', vehicle_id, price_amount, photo_path, reporter_user_id
+                    FROM entries
+                    """
+                )
+            )
+        conn.execute(text("DROP TABLE entries"))
+        conn.execute(text("ALTER TABLE entries_new RENAME TO entries"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_entries_created_at ON entries (created_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_entries_reporter ON entries (reporter_user_id)"))
+
+
 def init_db() -> None:
     settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
     settings.photos_dir.mkdir(parents=True, exist_ok=True)
@@ -77,6 +137,7 @@ def init_db() -> None:
     from app.db import models  # noqa: F401
 
     _migrate_prices_to_settlements()
+    _migrate_entries_plot_name()
     Base.metadata.create_all(bind=engine)
 
 

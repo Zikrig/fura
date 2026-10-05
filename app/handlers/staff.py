@@ -9,7 +9,6 @@ from app.db.database import session_scope
 from app.db.repo import Repo
 from app.handlers.common import ack, clear_ctx, edit_or_answer, role_for, staff_card_text
 from app.keyboards.menus import (
-    plots_pick_keyboard,
     settlements_pick_keyboard,
     staff_card_keyboard,
     staff_list_keyboard,
@@ -187,65 +186,6 @@ async def staff_sett_page(event: MessageCallback, context: MemoryContext):
 async def staff_pick_settlement(event: MessageCallback, context: MemoryContext):
     await ack(event)
     sett_id = int(event.callback.payload.split(":")[-1])
-    await context.update_data(settlement_id=sett_id)
-    await context.set_state(StaffAdd.plot)
-    with session_scope() as session:
-        plots = Repo(session).list_plots(sett_id)
-    if not plots:
-        await edit_or_answer(
-            event,
-            "В этом поселке нет участков. Добавьте их в «Участки».",
-            _nav_kb("staff:back:settlement"),
-        )
-        return
-    kb = plots_pick_keyboard(
-        plots,
-        page=0,
-        pick_prefix="staff:pickplot",
-        page_prefix="staff:plotpage",
-        back_payload="staff:back:settlement",
-    )
-    await edit_or_answer(event, "Выберите участок:", kb)
-
-
-@router.message_callback(StaffAdd.plot, F.callback.payload == "staff:back:settlement")
-async def staff_back_settlement(event: MessageCallback, context: MemoryContext):
-    await ack(event)
-    await context.set_state(StaffAdd.settlement)
-    with session_scope() as session:
-        items = Repo(session).list_settlements()
-    kb = settlements_pick_keyboard(
-        items,
-        page=0,
-        pick_prefix="staff:picksett",
-        page_prefix="staff:settpage",
-        back_payload="staff:back:name",
-    )
-    await edit_or_answer(event, "Выберите поселок:", kb)
-
-
-@router.message_callback(StaffAdd.plot, F.callback.payload.startswith("staff:plotpage:"))
-async def staff_plot_page(event: MessageCallback, context: MemoryContext):
-    await ack(event)
-    page = int(event.callback.payload.split(":")[-1])
-    data = await context.get_data()
-    sett_id = int(data["settlement_id"])
-    with session_scope() as session:
-        plots = Repo(session).list_plots(sett_id)
-    kb = plots_pick_keyboard(
-        plots,
-        page=page,
-        pick_prefix="staff:pickplot",
-        page_prefix="staff:plotpage",
-        back_payload="staff:back:settlement",
-    )
-    await edit_or_answer(event, "Выберите участок:", kb)
-
-
-@router.message_callback(StaffAdd.plot, F.callback.payload.startswith("staff:pickplot:"))
-async def staff_pick_plot(event: MessageCallback, context: MemoryContext):
-    await ack(event)
-    plot_id = int(event.callback.payload.split(":")[-1])
     data = await context.get_data()
     role = data["role"]
     with session_scope() as session:
@@ -255,8 +195,7 @@ async def staff_pick_plot(event: MessageCallback, context: MemoryContext):
             role=role,
             name=data["name"],
             max_link=data.get("max_link") or "",
-            settlement_id=int(data["settlement_id"]),
-            plot_id=plot_id,
+            settlement_id=sett_id,
         )
         staff = repo.get_staff_by_id(staff.id)
         text = "✅ Сохранено\n\n" + staff_card_text(staff)
@@ -292,7 +231,7 @@ async def cb_staff_del(event: MessageCallback, context: MemoryContext):
 @router.message_callback(F.callback.payload.startswith("staff:edit:"))
 async def cb_staff_edit(event: MessageCallback, context: MemoryContext):
     await ack(event)
-    # staff:edit:name:12 / staff:edit:link:12 / staff:edit:settlement:12 / staff:edit:plot:12
+    # staff:edit:name:12 / staff:edit:link:12 / staff:edit:settlement:12
     parts = event.callback.payload.split(":")
     if len(parts) < 4:
         return
@@ -304,7 +243,6 @@ async def cb_staff_edit(event: MessageCallback, context: MemoryContext):
             await edit_or_answer(event, "Недостаточно прав.")
             return
         role = staff.role
-        sett_id = staff.settlement_id
 
     if field == "settlement":
         with session_scope() as session:
@@ -317,22 +255,6 @@ async def cb_staff_edit(event: MessageCallback, context: MemoryContext):
             back_payload=f"staff:view:{staff_id}",
         )
         await edit_or_answer(event, "Выберите новый поселок:", kb)
-        return
-
-    if field == "plot":
-        if not sett_id:
-            await edit_or_answer(event, "Сначала укажите поселок.", _nav_kb(f"staff:view:{staff_id}"))
-            return
-        with session_scope() as session:
-            plots = Repo(session).list_plots(sett_id)
-        kb = plots_pick_keyboard(
-            plots,
-            page=0,
-            pick_prefix=f"staff:setplot:{staff_id}",
-            page_prefix=f"staff:edplotpage:{staff_id}",
-            back_payload=f"staff:view:{staff_id}",
-        )
-        await edit_or_answer(event, "Выберите новый участок:", kb)
         return
 
     await context.set_state(StaffEdit.value)
@@ -351,30 +273,11 @@ async def cb_staff_set_settlement(event: MessageCallback, context: MemoryContext
     sett_id = int(parts[3])
     with session_scope() as session:
         repo = Repo(session)
-        plots = repo.list_plots(sett_id)
-        new_plot = plots[0].id if plots else None
-        repo.update_staff_field(staff_id, settlement_id=sett_id, plot_id=new_plot)
+        repo.update_staff_field(staff_id, settlement_id=sett_id)
         staff = repo.get_staff_by_id(staff_id)
         text = staff_card_text(staff)
         role = staff.role
     await edit_or_answer(event, "Поселок обновлён.\n\n" + text, staff_card_keyboard(staff_id, role))
-
-
-@router.message_callback(F.callback.payload.startswith("staff:setplot:"))
-async def cb_staff_set_plot(event: MessageCallback, context: MemoryContext):
-    await ack(event)
-    parts = event.callback.payload.split(":")
-    staff_id = int(parts[2])
-    plot_id = int(parts[3])
-    with session_scope() as session:
-        repo = Repo(session)
-        plot = repo.get_plot(plot_id)
-        if plot:
-            repo.update_staff_field(staff_id, plot_id=plot_id, settlement_id=plot.settlement_id)
-        staff = repo.get_staff_by_id(staff_id)
-        text = staff_card_text(staff)
-        role = staff.role
-    await edit_or_answer(event, "Участок обновлён.\n\n" + text, staff_card_keyboard(staff_id, role))
 
 
 @router.message_created(StaffEdit.value)

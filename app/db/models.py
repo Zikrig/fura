@@ -22,22 +22,9 @@ class Settlement(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
 
-    plots: Mapped[list[Plot]] = relationship(back_populates="settlement", cascade="all, delete-orphan")
     staff: Mapped[list[Staff]] = relationship(back_populates="settlement")
     prices: Mapped[list[Price]] = relationship(back_populates="settlement", cascade="all, delete-orphan")
-
-
-class Plot(Base):
-    __tablename__ = "plots"
-    __table_args__ = (UniqueConstraint("settlement_id", "name", name="uq_plot_settlement_name"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    settlement_id: Mapped[int] = mapped_column(ForeignKey("settlements.id", ondelete="CASCADE"), nullable=False)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-
-    settlement: Mapped[Settlement] = relationship(back_populates="plots")
-    staff: Mapped[list[Staff]] = relationship(back_populates="plot")
-    entries: Mapped[list[Entry]] = relationship(back_populates="plot")
+    entries: Mapped[list[Entry]] = relationship(back_populates="settlement")
 
 
 class Vehicle(Base):
@@ -74,10 +61,8 @@ class Staff(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     max_link: Mapped[str] = mapped_column(Text, nullable=False, default="")
     settlement_id: Mapped[int | None] = mapped_column(ForeignKey("settlements.id", ondelete="SET NULL"))
-    plot_id: Mapped[int | None] = mapped_column(ForeignKey("plots.id", ondelete="SET NULL"))
 
     settlement: Mapped[Settlement | None] = relationship(back_populates="staff")
-    plot: Mapped[Plot | None] = relationship(back_populates="staff")
 
 
 class Entry(Base):
@@ -85,11 +70,12 @@ class Entry(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
-    plot_id: Mapped[int] = mapped_column(ForeignKey("plots.id", ondelete="RESTRICT"), nullable=False)
+    settlement_id: Mapped[int | None] = mapped_column(ForeignKey("settlements.id", ondelete="SET NULL"))
+    plot_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id", ondelete="RESTRICT"), nullable=False)
     price_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     photo_path: Mapped[str] = mapped_column(Text, nullable=False)
     reporter_user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
 
-    plot: Mapped[Plot] = relationship(back_populates="entries")
+    settlement: Mapped[Settlement | None] = relationship(back_populates="entries")
     vehicle: Mapped[Vehicle] = relationship(back_populates="entries")

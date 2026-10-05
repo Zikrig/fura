@@ -22,7 +22,6 @@ def main_menu_keyboard(role: Role) -> InlineKeyboardBuilder:
 
     if role in {Role.ADMIN, Role.MANAGER}:
         kb.row(CallbackButton(text="Поселки", payload="settl:list:0"))
-        kb.row(CallbackButton(text="Участки", payload="plot:root:0"))
         kb.row(CallbackButton(text="Транспорт", payload="veh:list:0"))
         kb.row(CallbackButton(text="Таблица Цены", payload="price:menu"))
         kb.row(CallbackButton(text="Таблица результаты", payload="res:period"))
@@ -51,7 +50,6 @@ def staff_card_keyboard(staff_id: int, role: str, page: int = 0) -> InlineKeyboa
     kb.row(CallbackButton(text="Изменить ссылку", payload=f"staff:edit:link:{staff_id}"))
     kb.row(CallbackButton(text="Изменить имя", payload=f"staff:edit:name:{staff_id}"))
     kb.row(CallbackButton(text="Изменить поселок", payload=f"staff:edit:settlement:{staff_id}"))
-    kb.row(CallbackButton(text="Изменить участок", payload=f"staff:edit:plot:{staff_id}"))
     kb.row(CallbackButton(text="🗑 Удалить", payload=f"staff:del:{staff_id}"))
     kb.row(*back_row(f"staff:list:{role}:{page}"))
     return kb
@@ -92,29 +90,6 @@ def settlements_pick_keyboard(
     chunk = items[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
     for item in chunk:
         kb.row(CallbackButton(text=item.name[:60], payload=f"{pick_prefix}:{item.id}"))
-    _add_pager(kb, page, total, page_prefix)
-    kb.row(*back_row(back_payload))
-    return kb
-
-
-def plots_pick_keyboard(
-    items: list,
-    *,
-    page: int,
-    pick_prefix: str,
-    page_prefix: str,
-    back_payload: str,
-    with_settlement: bool = False,
-) -> InlineKeyboardBuilder:
-    kb = InlineKeyboardBuilder()
-    total = len(items)
-    chunk = items[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
-    for item in chunk:
-        if with_settlement and item.settlement:
-            label = f"{item.settlement.name} / {item.name}"
-        else:
-            label = item.name
-        kb.row(CallbackButton(text=label[:60], payload=f"{pick_prefix}:{item.id}"))
     _add_pager(kb, page, total, page_prefix)
     kb.row(*back_row(back_payload))
     return kb

@@ -45,8 +45,8 @@ def export_results_xlsx(
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=ZoneInfo("UTC"))
         local = dt.astimezone(tz)
-        sett = entry.plot.settlement.name if entry.plot and entry.plot.settlement else ""
-        plot_name = entry.plot.name if entry.plot else ""
+        sett = entry.settlement.name if entry.settlement else ""
+        plot_name = entry.plot_name or ""
         vehicle_name = entry.vehicle.name if entry.vehicle else ""
 
         ws.cell(row_idx, 1, local.strftime("%d.%m.%Y"))
