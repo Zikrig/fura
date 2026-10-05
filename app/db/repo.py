@@ -41,6 +41,7 @@ class Repo:
         name: str,
         max_link: str,
         settlement_id: int,
+        plot_name: str = "",
     ) -> Staff:
         existing = self.get_staff(user_id)
         if existing:
@@ -48,6 +49,7 @@ class Repo:
             existing.name = name
             existing.max_link = max_link
             existing.settlement_id = settlement_id
+            existing.plot_name = plot_name.strip()
             self.session.flush()
             return existing
         row = Staff(
@@ -56,6 +58,7 @@ class Repo:
             name=name,
             max_link=max_link,
             settlement_id=settlement_id,
+            plot_name=plot_name.strip(),
         )
         self.session.add(row)
         self.session.flush()

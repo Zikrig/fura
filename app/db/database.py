@@ -129,6 +129,17 @@ def _migrate_entries_plot_name() -> None:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_entries_reporter ON entries (reporter_user_id)"))
 
 
+def _migrate_staff_plot_name() -> None:
+    insp = inspect(engine)
+    if "staff" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("staff")}
+    if "plot_name" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE staff ADD COLUMN plot_name TEXT NOT NULL DEFAULT ''"))
+
+
 def init_db() -> None:
     settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
     settings.photos_dir.mkdir(parents=True, exist_ok=True)
@@ -138,6 +149,7 @@ def init_db() -> None:
 
     _migrate_prices_to_settlements()
     _migrate_entries_plot_name()
+    _migrate_staff_plot_name()
     Base.metadata.create_all(bind=engine)
 
 

@@ -50,6 +50,8 @@ def staff_card_keyboard(staff_id: int, role: str, page: int = 0) -> InlineKeyboa
     kb.row(CallbackButton(text="Изменить ссылку", payload=f"staff:edit:link:{staff_id}"))
     kb.row(CallbackButton(text="Изменить имя", payload=f"staff:edit:name:{staff_id}"))
     kb.row(CallbackButton(text="Изменить поселок", payload=f"staff:edit:settlement:{staff_id}"))
+    if role == "guard":
+        kb.row(CallbackButton(text="Изменить участок", payload=f"staff:edit:plot:{staff_id}"))
     kb.row(CallbackButton(text="🗑 Удалить", payload=f"staff:del:{staff_id}"))
     kb.row(*back_row(f"staff:list:{role}:{page}"))
     return kb

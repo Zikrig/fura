@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from maxapi import F, Router
 from maxapi.context.context import MemoryContext
-from maxapi.types import CallbackButton, MessageCallback, MessageCreated
+from maxapi.types import MessageCallback, MessageCreated
 from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 
 from app.config import settings
@@ -19,6 +19,8 @@ from app.states import EntryFlow
 
 router = Router("entry")
 
+ADMIN_MANAGER_PLOT = "-1"
+
 
 @router.message_callback(F.callback.payload == "entry:start")
 async def entry_start(event: MessageCallback, context: MemoryContext):
@@ -28,8 +30,8 @@ async def entry_start(event: MessageCallback, context: MemoryContext):
     if not can_use_bot(role):
         await edit_or_answer(event, "Нет доступа.")
         return
+    await clear_ctx(context)
     await context.set_state(EntryFlow.photo)
-    await context.update_data({})
     kb = InlineKeyboardBuilder()
     kb.row(*back_row("menu:main"))
     await edit_or_answer(event, "Отправьте фото въезда:", kb)
@@ -77,18 +79,6 @@ async def entry_veh_page(event: MessageCallback, context: MemoryContext):
     await edit_or_answer(event, "Выберите тип авто:", entry_vehicle_keyboard(vehicles, page))
 
 
-def _plot_prompt_kb(back_payload: str) -> InlineKeyboardBuilder:
-    kb = InlineKeyboardBuilder()
-    kb.row(*back_row(back_payload))
-    return kb
-
-
-async def _ask_plot(event, context: MemoryContext, settlement_id: int, back_payload: str) -> None:
-    await context.update_data(settlement_id=settlement_id, plot_back=back_payload)
-    await context.set_state(EntryFlow.plot)
-    await edit_or_answer(event, "Введите участок:", _plot_prompt_kb(back_payload))
-
-
 @router.message_callback(EntryFlow.vehicle, F.callback.payload.startswith("entry:veh:"))
 async def entry_pick_vehicle(event: MessageCallback, context: MemoryContext):
     await ack(event)
@@ -101,15 +91,16 @@ async def entry_pick_vehicle(event: MessageCallback, context: MemoryContext):
         with session_scope() as session:
             staff = Repo(session).get_staff(user_id)
             settlement_id = staff.settlement_id if staff else None
-        if not settlement_id:
+            plot_name = (staff.plot_name if staff else "") or ""
+        if not settlement_id or not plot_name.strip():
             await edit_or_answer(
                 event,
-                "У охранника не указан поселок. Попросите менеджера заполнить карточку.",
+                "У охранника не заполнены поселок и участок. Попросите менеджера заполнить карточку.",
                 InlineKeyboardBuilder().row(*back_row("menu:main")),
             )
             await clear_ctx(context)
             return
-        await _ask_plot(event, context, settlement_id, "entry:back_vehicle")
+        await _finish_entry(event, context, user_id, vehicle_id, settlement_id, plot_name.strip())
         return
 
     with session_scope() as session:
@@ -135,7 +126,6 @@ async def entry_pick_vehicle(event: MessageCallback, context: MemoryContext):
 
 @router.message_callback(EntryFlow.vehicle, F.callback.payload == "entry:back_vehicle")
 @router.message_callback(EntryFlow.settlement, F.callback.payload == "entry:back_vehicle")
-@router.message_callback(EntryFlow.plot, F.callback.payload == "entry:back_vehicle")
 async def entry_back_vehicle(event: MessageCallback, context: MemoryContext):
     await ack(event)
     await context.set_state(EntryFlow.vehicle)
@@ -164,42 +154,10 @@ async def entry_sett_page(event: MessageCallback, context: MemoryContext):
 async def entry_pick_settlement(event: MessageCallback, context: MemoryContext):
     await ack(event)
     settlement_id = int(event.callback.payload.split(":")[-1])
-    await _ask_plot(event, context, settlement_id, "entry:back_settlement")
-
-
-@router.message_callback(EntryFlow.plot, F.callback.payload == "entry:back_settlement")
-async def entry_back_settlement(event: MessageCallback, context: MemoryContext):
-    await ack(event)
-    await context.set_state(EntryFlow.settlement)
-    with session_scope() as session:
-        settlements = Repo(session).list_settlements()
-    kb = settlements_pick_keyboard(
-        settlements,
-        page=0,
-        pick_prefix="entry:sett",
-        page_prefix="entry:settpage",
-        back_payload="entry:back_vehicle",
-    )
-    await edit_or_answer(event, "Выберите поселок:", kb)
-
-
-@router.message_created(EntryFlow.plot)
-async def entry_plot_text(event: MessageCreated, context: MemoryContext):
-    plot_name = ((event.message.body.text if event.message.body else "") or "").strip()
     data = await context.get_data()
-    back = data.get("plot_back") or "entry:back_vehicle"
-    if not plot_name:
-        await event.message.answer(
-            "Участок пустой. Введите участок:",
-            attachments=[_plot_prompt_kb(back).as_markup()],
-        )
-        return
-    user_id = event.message.sender.user_id if event.message.sender else None
-    if not user_id:
-        return
+    user_id = event.callback.user.user_id
     vehicle_id = int(data["vehicle_id"])
-    settlement_id = int(data["settlement_id"])
-    await _finish_entry(event, context, user_id, vehicle_id, settlement_id, plot_name)
+    await _finish_entry(event, context, user_id, vehicle_id, settlement_id, ADMIN_MANAGER_PLOT)
 
 
 async def _finish_entry(
@@ -213,9 +171,10 @@ async def _finish_entry(
     data = await context.get_data()
     photo_path = data.get("photo_path")
     if not photo_path:
-        await event.message.answer(
+        await edit_or_answer(
+            event,
             "Фото потеряно, начните заново.",
-            attachments=[InlineKeyboardBuilder().row(*back_row("menu:main")).as_markup()],
+            InlineKeyboardBuilder().row(*back_row("menu:main")),
         )
         await clear_ctx(context)
         return
@@ -249,4 +208,4 @@ async def _finish_entry(
         f"Тип авто: {veh_name}\n"
         f"Стоимость: {amount}"
     )
-    await event.message.answer(text, attachments=[InlineKeyboardBuilder().row(*back_row("menu:main")).as_markup()])
+    await edit_or_answer(event, text, InlineKeyboardBuilder().row(*back_row("menu:main")))

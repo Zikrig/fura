@@ -95,6 +95,7 @@ async def cb_staff_add(event: MessageCallback, context: MemoryContext):
 
 @router.message_callback(StaffAdd.link, F.callback.payload.startswith("staff:list:"))
 @router.message_callback(StaffAdd.name, F.callback.payload.startswith("staff:list:"))
+@router.message_callback(StaffAdd.plot, F.callback.payload.startswith("staff:list:"))
 async def cb_staff_add_back_list(event: MessageCallback, context: MemoryContext):
     await clear_ctx(context)
     await cb_staff_list(event, context)
@@ -182,10 +183,7 @@ async def staff_sett_page(event: MessageCallback, context: MemoryContext):
     await edit_or_answer(event, "Выберите поселок:", kb)
 
 
-@router.message_callback(StaffAdd.settlement, F.callback.payload.startswith("staff:picksett:"))
-async def staff_pick_settlement(event: MessageCallback, context: MemoryContext):
-    await ack(event)
-    sett_id = int(event.callback.payload.split(":")[-1])
+async def _save_new_staff(event, context: MemoryContext, *, settlement_id: int, plot_name: str) -> None:
     data = await context.get_data()
     role = data["role"]
     with session_scope() as session:
@@ -195,13 +193,61 @@ async def staff_pick_settlement(event: MessageCallback, context: MemoryContext):
             role=role,
             name=data["name"],
             max_link=data.get("max_link") or "",
-            settlement_id=sett_id,
+            settlement_id=settlement_id,
+            plot_name=plot_name,
         )
         staff = repo.get_staff_by_id(staff.id)
         text = "✅ Сохранено\n\n" + staff_card_text(staff)
         sid = staff.id
     await clear_ctx(context)
     await edit_or_answer(event, text, staff_card_keyboard(sid, role))
+
+
+@router.message_callback(StaffAdd.settlement, F.callback.payload.startswith("staff:picksett:"))
+async def staff_pick_settlement(event: MessageCallback, context: MemoryContext):
+    await ack(event)
+    sett_id = int(event.callback.payload.split(":")[-1])
+    data = await context.get_data()
+    if data.get("role") == "guard":
+        await context.update_data(settlement_id=sett_id)
+        await context.set_state(StaffAdd.plot)
+        await edit_or_answer(event, "Введите участок охранника:", _nav_kb("staff:back:settlement"))
+        return
+    await _save_new_staff(event, context, settlement_id=sett_id, plot_name="")
+
+
+@router.message_callback(StaffAdd.plot, F.callback.payload == "staff:back:settlement")
+async def staff_back_settlement(event: MessageCallback, context: MemoryContext):
+    await ack(event)
+    await context.set_state(StaffAdd.settlement)
+    with session_scope() as session:
+        items = Repo(session).list_settlements()
+    kb = settlements_pick_keyboard(
+        items,
+        page=0,
+        pick_prefix="staff:picksett",
+        page_prefix="staff:settpage",
+        back_payload="staff:back:name",
+    )
+    await edit_or_answer(event, "Выберите поселок:", kb)
+
+
+@router.message_created(StaffAdd.plot)
+async def staff_add_plot(event: MessageCreated, context: MemoryContext):
+    plot_name = ((event.message.body.text if event.message.body else "") or "").strip()
+    if not plot_name:
+        await event.message.answer(
+            "Участок пустой.",
+            attachments=[_nav_kb("staff:back:settlement").as_markup()],
+        )
+        return
+    data = await context.get_data()
+    await _save_new_staff(
+        event,
+        context,
+        settlement_id=int(data["settlement_id"]),
+        plot_name=plot_name,
+    )
 
 
 @router.message_callback(F.callback.payload.startswith("staff:del:"))
@@ -259,7 +305,12 @@ async def cb_staff_edit(event: MessageCallback, context: MemoryContext):
 
     await context.set_state(StaffEdit.value)
     await context.update_data(staff_id=staff_id, field=field, role=role)
-    prompt = _REF_PROMPT if field == "link" else "Новое имя:"
+    if field == "link":
+        prompt = _REF_PROMPT
+    elif field == "plot":
+        prompt = "Новый участок:"
+    else:
+        prompt = "Новое имя:"
     await edit_or_answer(event, prompt, _nav_kb(f"staff:view:{staff_id}"))
 
 
@@ -299,6 +350,11 @@ async def staff_edit_value(event: MessageCreated, context: MemoryContext):
                 await event.message.answer(_REF_FAIL)
                 return
             repo.update_staff_field(staff_id, user_id=uid, max_link=link)
+        elif field == "plot":
+            if not text:
+                await event.message.answer("Участок пустой.")
+                return
+            repo.update_staff_field(staff_id, plot_name=text)
         staff = repo.get_staff_by_id(staff_id)
         body = staff_card_text(staff)
         role = staff.role

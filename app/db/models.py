@@ -61,6 +61,7 @@ class Staff(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     max_link: Mapped[str] = mapped_column(Text, nullable=False, default="")
     settlement_id: Mapped[int | None] = mapped_column(ForeignKey("settlements.id", ondelete="SET NULL"))
+    plot_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
 
     settlement: Mapped[Settlement | None] = relationship(back_populates="staff")
 
