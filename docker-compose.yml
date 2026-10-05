@@ -1,0 +1,18 @@
+services:
+  bot:
+    build: .
+    container_name: fura_ochrana_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      SQLITE_PATH: /app/data/bot.sqlite3
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8080:8080"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
