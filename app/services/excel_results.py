@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import logging
+import os
+import re
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 from zoneinfo import ZoneInfo
 
 from openpyxl import Workbook
@@ -9,7 +14,10 @@ from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Font, PatternFill
 from PIL import Image as PILImage
 
+from app.config import settings
 from app.db.models import Entry
+
+logger = logging.getLogger("fura_ochrana")
 
 HEADER_FILL = PatternFill("solid", fgColor="D9E1F2")
 HEADER_FONT = Font(bold=True)
@@ -56,38 +64,88 @@ def export_results_xlsx(
         ws.cell(row_idx, 5, vehicle_name)
         ws.cell(row_idx, 6, entry.price_amount)
 
-        photo = Path(entry.photo_path)
-        if photo.is_file():
-            try:
-                thumb = _make_thumb(photo, output_path.parent / f".thumb_{entry.id}.jpg")
-                img = XLImage(str(thumb))
-                img.width = 120
-                img.height = 90
-                ws.row_dimensions[row_idx].height = 72
-                ws.add_image(img, f"G{row_idx}")
-            except Exception:
-                ws.cell(row_idx, 7, str(photo))
-        else:
+        photo = _resolve_photo(entry.photo_path)
+        if photo is None:
             ws.cell(row_idx, 7, "нет файла")
+            continue
+        try:
+            img, height_pt = _excel_image(photo)
+            ws.row_dimensions[row_idx].height = height_pt
+            ws.add_image(img, f"G{row_idx}")
+        except Exception:
+            logger.exception("Не удалось вставить фото %s", photo)
+            ws.cell(row_idx, 7, "не удалось вставить фото")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_path)
-
-    for p in output_path.parent.glob(".thumb_*.jpg"):
-        try:
-            p.unlink()
-        except OSError:
-            pass
+    _fix_image_targets(output_path)
     return output_path
 
 
-def _make_thumb(src: Path, dest: Path) -> Path:
-    with PILImage.open(src) as im:
-        im = im.convert("RGB")
-        im.thumbnail((240, 180))
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        im.save(dest, format="JPEG", quality=85)
-    return dest
+_ABS_TARGET = re.compile(r'Target="(/xl/[^"]+)"')
+
+
+def _relative_target(rels_name: str, abs_target: str) -> str:
+    """openpyxl пишет Target=\"/xl/...\", часть программ тогда не показывает рисунок."""
+    source_dir = Path(rels_name).parent.parent
+    rel = os.path.relpath(abs_target.lstrip("/"), source_dir.as_posix())
+    return rel.replace("\\", "/")
+
+
+def _fix_image_targets(path: Path) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with ZipFile(path, "r") as zin, ZipFile(tmp, "w") as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename.endswith(".rels") and b'Target="/xl/' in data:
+                text = data.decode("utf-8")
+                text = _ABS_TARGET.sub(
+                    lambda m, name=info.filename: f'Target="{_relative_target(name, m.group(1))}"',
+                    text,
+                )
+                data = text.encode("utf-8")
+            zout.writestr(info, data)
+    tmp.replace(path)
+
+
+def _resolve_photo(stored: str) -> Path | None:
+    raw = Path(stored or "")
+    if raw.is_file():
+        return raw
+    if raw.name:
+        candidate = settings.photos_dir / raw.name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+class _PngImage(XLImage):
+    """openpyxl 3.1.5 читает jpeg через img.fp, Pillow 11 отдаёт пустые байты — картинки в xlsx нет."""
+
+    def __init__(self, image: PILImage.Image):
+        super().__init__(image)
+        self.format = "png"
+
+    def _data(self) -> bytes:
+        image = self.ref
+        if not isinstance(image, PILImage.Image):
+            image = PILImage.open(image)
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGB")
+        buf = BytesIO()
+        image.save(buf, format="PNG")
+        return buf.getvalue()
+
+
+def _excel_image(src: Path) -> tuple[_PngImage, float]:
+    image = PILImage.open(src)
+    image = image.convert("RGB")
+    image.thumbnail((240, 180))
+    img = _PngImage(image)
+    img.width = image.width
+    img.height = image.height
+    height_pt = max(72, image.height * 0.75 + 6)
+    return img, height_pt
 
 
 def parse_date_ddmmyyyy(value: str) -> datetime | None:
