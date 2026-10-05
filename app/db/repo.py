@@ -98,6 +98,12 @@ class Repo:
         self.session.flush()
         return row
 
+    def ensure_settlement(self, name: str) -> Settlement:
+        row = self.get_settlement_by_name(name)
+        if row:
+            return row
+        return self.add_settlement(name)
+
     def rename_settlement(self, settlement_id: int, name: str) -> Settlement | None:
         row = self.get_settlement(settlement_id)
         if not row:
@@ -205,18 +211,18 @@ class Repo:
         return self.add_vehicle(name)
 
     # ----- prices -----
-    def get_price(self, vehicle_id: int, plot_id: int) -> Price | None:
+    def get_price(self, vehicle_id: int, settlement_id: int) -> Price | None:
         return self.session.scalar(
-            select(Price).where(Price.vehicle_id == vehicle_id, Price.plot_id == plot_id)
+            select(Price).where(Price.vehicle_id == vehicle_id, Price.settlement_id == settlement_id)
         )
 
-    def set_price(self, vehicle_id: int, plot_id: int, amount: float) -> Price:
-        row = self.get_price(vehicle_id, plot_id)
+    def set_price(self, vehicle_id: int, settlement_id: int, amount: float) -> Price:
+        row = self.get_price(vehicle_id, settlement_id)
         if row:
             row.amount = float(amount)
             self.session.flush()
             return row
-        row = Price(vehicle_id=vehicle_id, plot_id=plot_id, amount=float(amount))
+        row = Price(vehicle_id=vehicle_id, settlement_id=settlement_id, amount=float(amount))
         self.session.add(row)
         self.session.flush()
         return row
@@ -224,7 +230,7 @@ class Repo:
     def list_prices(self) -> list[Price]:
         return list(
             self.session.scalars(
-                select(Price).options(joinedload(Price.vehicle), joinedload(Price.plot))
+                select(Price).options(joinedload(Price.vehicle), joinedload(Price.settlement))
             ).unique()
         )
 

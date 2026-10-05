@@ -31,7 +31,7 @@ async def price_menu(event: MessageCallback, context: MemoryContext):
         return
     await edit_or_answer(
         event,
-        "Таблица Цены: транспорт × участки.\n"
+        "Таблица Цены: транспорт × поселки.\n"
         "Выгрузите Excel, отредактируйте (новые строки/столбцы) и загрузите обратно.",
         price_menu_keyboard(),
     )
@@ -76,7 +76,7 @@ async def price_import_file(event: MessageCreated, context: MemoryContext):
     await event.message.answer(
         "Импорт выполнен.\n"
         f"Новый транспорт: {stats['created_vehicles']}\n"
-        f"Новые участки: {stats['created_plots']}\n"
+        f"Новые поселки: {stats['created_settlements']}\n"
         f"Обновлено цен: {stats['updated_prices']}",
         attachments=[price_menu_keyboard().as_markup()],
     )

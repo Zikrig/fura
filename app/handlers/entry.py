@@ -166,10 +166,10 @@ async def _finish_entry(event, context: MemoryContext, user_id: int, vehicle_id:
     now = datetime.now(ZoneInfo(settings.TIMEZONE)).replace(tzinfo=None)
     with session_scope() as session:
         repo = Repo(session)
-        price = repo.get_price(vehicle_id, plot_id)
+        plot = repo.get_plot(plot_id)
+        price = repo.get_price(vehicle_id, plot.settlement_id) if plot else None
         amount = price.amount if price else 0.0
         vehicle = repo.get_vehicle(vehicle_id)
-        plot = repo.get_plot(plot_id)
         repo.add_entry(
             created_at=now,
             plot_id=plot_id,

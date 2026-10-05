@@ -24,6 +24,7 @@ class Settlement(Base):
 
     plots: Mapped[list[Plot]] = relationship(back_populates="settlement", cascade="all, delete-orphan")
     staff: Mapped[list[Staff]] = relationship(back_populates="settlement")
+    prices: Mapped[list[Price]] = relationship(back_populates="settlement", cascade="all, delete-orphan")
 
 
 class Plot(Base):
@@ -36,7 +37,6 @@ class Plot(Base):
 
     settlement: Mapped[Settlement] = relationship(back_populates="plots")
     staff: Mapped[list[Staff]] = relationship(back_populates="plot")
-    prices: Mapped[list[Price]] = relationship(back_populates="plot", cascade="all, delete-orphan")
     entries: Mapped[list[Entry]] = relationship(back_populates="plot")
 
 
@@ -52,15 +52,15 @@ class Vehicle(Base):
 
 class Price(Base):
     __tablename__ = "prices"
-    __table_args__ = (UniqueConstraint("vehicle_id", "plot_id", name="uq_price_vehicle_plot"),)
+    __table_args__ = (UniqueConstraint("vehicle_id", "settlement_id", name="uq_price_vehicle_settlement"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False)
-    plot_id: Mapped[int] = mapped_column(ForeignKey("plots.id", ondelete="CASCADE"), nullable=False)
+    settlement_id: Mapped[int] = mapped_column(ForeignKey("settlements.id", ondelete="CASCADE"), nullable=False)
     amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
     vehicle: Mapped[Vehicle] = relationship(back_populates="prices")
-    plot: Mapped[Plot] = relationship(back_populates="prices")
+    settlement: Mapped[Settlement] = relationship(back_populates="prices")
 
 
 class Staff(Base):
