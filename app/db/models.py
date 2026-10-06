@@ -3,17 +3,27 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    Column,
     DateTime,
     Float,
     ForeignKey,
     Integer,
     String,
+    Table,
     Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+
+# Поселки охранника. Менеджер к поселку не привязан.
+staff_settlements = Table(
+    "staff_settlements",
+    Base.metadata,
+    Column("staff_id", ForeignKey("staff.id", ondelete="CASCADE"), primary_key=True),
+    Column("settlement_id", ForeignKey("settlements.id", ondelete="CASCADE"), primary_key=True),
+)
 
 
 class Settlement(Base):
@@ -22,7 +32,10 @@ class Settlement(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
 
-    staff: Mapped[list[Staff]] = relationship(back_populates="settlement")
+    guards: Mapped[list[Staff]] = relationship(
+        secondary=staff_settlements,
+        back_populates="settlements",
+    )
     prices: Mapped[list[Price]] = relationship(back_populates="settlement", cascade="all, delete-orphan")
     entries: Mapped[list[Entry]] = relationship(back_populates="settlement")
 
@@ -60,10 +73,12 @@ class Staff(Base):
     role: Mapped[str] = mapped_column(String(32), nullable=False)  # manager | guard
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     max_link: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    settlement_id: Mapped[int | None] = mapped_column(ForeignKey("settlements.id", ondelete="SET NULL"))
-    plot_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
 
-    settlement: Mapped[Settlement | None] = relationship(back_populates="staff")
+    settlements: Mapped[list[Settlement]] = relationship(
+        secondary=staff_settlements,
+        back_populates="guards",
+        order_by="Settlement.name",
+    )
 
 
 class Entry(Base):

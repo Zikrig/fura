@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, joinedload
 
-from app.db.models import Entry, Price, Settlement, Staff, Vehicle
+from app.db.models import Entry, Price, Settlement, Staff, Vehicle, staff_settlements
 
 
 class Repo:
@@ -13,21 +13,23 @@ class Repo:
         self.session = session
 
     # ----- staff -----
-    def get_staff(self, user_id: int) -> Staff | None:
-        return self.session.scalar(select(Staff).where(Staff.user_id == user_id))
+    def get_staff(self, user_id: int, *, with_settlements: bool = False) -> Staff | None:
+        stmt = select(Staff).where(Staff.user_id == user_id)
+        if with_settlements:
+            stmt = stmt.options(joinedload(Staff.settlements))
+            return self.session.scalars(stmt).unique().one_or_none()
+        return self.session.scalar(stmt)
 
     def get_staff_by_id(self, staff_id: int) -> Staff | None:
-        return self.session.scalar(
-            select(Staff)
-            .options(joinedload(Staff.settlement))
-            .where(Staff.id == staff_id)
-        )
+        return self.session.scalars(
+            select(Staff).options(joinedload(Staff.settlements)).where(Staff.id == staff_id)
+        ).unique().one_or_none()
 
     def list_staff(self, role: str) -> list[Staff]:
         return list(
             self.session.scalars(
                 select(Staff)
-                .options(joinedload(Staff.settlement))
+                .options(joinedload(Staff.settlements))
                 .where(Staff.role == role)
                 .order_by(Staff.name.asc())
             ).unique()
@@ -40,16 +42,17 @@ class Repo:
         role: str,
         name: str,
         max_link: str,
-        settlement_id: int,
-        plot_name: str = "",
+        settlement_ids: list[int] | None = None,
     ) -> Staff:
         existing = self.get_staff(user_id)
         if existing:
             existing.role = role
             existing.name = name
             existing.max_link = max_link
-            existing.settlement_id = settlement_id
-            existing.plot_name = plot_name.strip()
+            if role == "guard":
+                self._replace_guard_settlements(existing, settlement_ids or [])
+            else:
+                existing.settlements.clear()
             self.session.flush()
             return existing
         row = Staff(
@@ -57,17 +60,38 @@ class Repo:
             role=role,
             name=name,
             max_link=max_link,
-            settlement_id=settlement_id,
-            plot_name=plot_name.strip(),
         )
         self.session.add(row)
         self.session.flush()
+        if role == "guard":
+            self._replace_guard_settlements(row, settlement_ids or [])
+            self.session.flush()
         return row
+
+    def set_guard_settlements(self, staff_id: int, settlement_ids: list[int]) -> Staff | None:
+        staff = self.get_staff_by_id(staff_id)
+        if not staff:
+            return None
+        self._replace_guard_settlements(staff, settlement_ids)
+        self.session.flush()
+        return staff
+
+    def _replace_guard_settlements(self, staff: Staff, settlement_ids: list[int]) -> None:
+        unique_ids = list(dict.fromkeys(settlement_ids))
+        if unique_ids:
+            rows = list(self.session.scalars(select(Settlement).where(Settlement.id.in_(unique_ids))))
+            order = {sid: index for index, sid in enumerate(unique_ids)}
+            rows.sort(key=lambda item: order.get(item.id, 0))
+        else:
+            rows = []
+        staff.settlements = rows
 
     def delete_staff(self, staff_id: int) -> bool:
         row = self.get_staff_by_id(staff_id)
         if not row:
             return False
+        row.settlements.clear()
+        self.session.flush()
         self.session.delete(row)
         self.session.flush()
         return True
@@ -116,6 +140,9 @@ class Repo:
         row = self.get_settlement(settlement_id)
         if not row:
             return False
+        self.session.execute(
+            delete(staff_settlements).where(staff_settlements.c.settlement_id == settlement_id)
+        )
         self.session.delete(row)
         self.session.flush()
         return True

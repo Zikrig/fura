@@ -36,8 +36,9 @@ def staff_list_keyboard(items: list, role: str, page: int, back_payload: str = "
     chunk = items[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
     for item in chunk:
         label = item.name
-        if item.settlement:
-            label = f"{item.name} ({item.settlement.name})"
+        if getattr(item, "role", None) == "guard" and item.settlements:
+            names = ", ".join(s.name for s in item.settlements)
+            label = f"{item.name} ({names})"
         kb.row(CallbackButton(text=label[:60], payload=f"staff:view:{item.id}"))
     _add_pager(kb, page, total, f"staff:list:{role}")
     kb.row(CallbackButton(text="➕ Добавить", payload=f"staff:add:{role}"))
@@ -49,9 +50,8 @@ def staff_card_keyboard(staff_id: int, role: str, page: int = 0) -> InlineKeyboa
     kb = InlineKeyboardBuilder()
     kb.row(CallbackButton(text="Изменить ссылку", payload=f"staff:edit:link:{staff_id}"))
     kb.row(CallbackButton(text="Изменить имя", payload=f"staff:edit:name:{staff_id}"))
-    kb.row(CallbackButton(text="Изменить поселок", payload=f"staff:edit:settlement:{staff_id}"))
     if role == "guard":
-        kb.row(CallbackButton(text="Изменить участок", payload=f"staff:edit:plot:{staff_id}"))
+        kb.row(CallbackButton(text="Изменить поселки", payload=f"staff:edit:settlements:{staff_id}"))
     kb.row(CallbackButton(text="🗑 Удалить", payload=f"staff:del:{staff_id}"))
     kb.row(*back_row(f"staff:list:{role}:{page}"))
     return kb
@@ -93,6 +93,33 @@ def settlements_pick_keyboard(
     for item in chunk:
         kb.row(CallbackButton(text=item.name[:60], payload=f"{pick_prefix}:{item.id}"))
     _add_pager(kb, page, total, page_prefix)
+    kb.row(*back_row(back_payload))
+    return kb
+
+
+def settlements_multi_keyboard(
+    items: list,
+    *,
+    page: int,
+    selected_ids: set[int],
+    toggle_prefix: str,
+    page_prefix: str,
+    ok_payload: str,
+    back_payload: str,
+) -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    total = len(items)
+    chunk = items[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
+    for item in chunk:
+        mark = "🟢" if item.id in selected_ids else "🔴"
+        kb.row(
+            CallbackButton(
+                text=f"{mark} {item.name}"[:60],
+                payload=f"{toggle_prefix}:{item.id}:{page}",
+            )
+        )
+    _add_pager(kb, page, total, page_prefix)
+    kb.row(CallbackButton(text="Ок", payload=ok_payload))
     kb.row(*back_row(back_payload))
     return kb
 

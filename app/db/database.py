@@ -129,15 +129,79 @@ def _migrate_entries_plot_name() -> None:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_entries_reporter ON entries (reporter_user_id)"))
 
 
-def _migrate_staff_plot_name() -> None:
+def _drop_staff_plot_name() -> None:
+    """Участок не хранится у охранника: его вводят строкой при въезде."""
     insp = inspect(engine)
     if "staff" not in insp.get_table_names():
         return
     cols = {c["name"] for c in insp.get_columns("staff")}
-    if "plot_name" in cols:
+    if "plot_name" not in cols:
         return
     with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE staff ADD COLUMN plot_name TEXT NOT NULL DEFAULT ''"))
+        conn.execute(text("ALTER TABLE staff DROP COLUMN plot_name"))
+
+
+def _drop_staff_settlement_binding() -> None:
+    """Менеджер не закреплён за поселком. У охранника поселки остаются в staff_settlements."""
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    if "staff" not in tables or "settlements" not in tables:
+        return
+    cols = {c["name"] for c in insp.get_columns("staff")}
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS staff_settlements (
+                    staff_id INTEGER NOT NULL,
+                    settlement_id INTEGER NOT NULL,
+                    PRIMARY KEY (staff_id, settlement_id),
+                    FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
+                    FOREIGN KEY (settlement_id) REFERENCES settlements(id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+        if "settlement_id" in cols:
+            conn.execute(
+                text(
+                    """
+                    INSERT OR IGNORE INTO staff_settlements (staff_id, settlement_id)
+                    SELECT s.id, s.settlement_id
+                    FROM staff AS s
+                    JOIN settlements AS st ON st.id = s.settlement_id
+                    WHERE s.role = 'guard' AND s.settlement_id IS NOT NULL
+                    """
+                )
+            )
+    if "settlement_id" not in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE staff_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    role VARCHAR(32) NOT NULL,
+                    name VARCHAR(255) NOT NULL,
+                    max_link TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO staff_new (id, user_id, role, name, max_link)
+                SELECT id, user_id, role, name, COALESCE(max_link, '')
+                FROM staff
+                """
+            )
+        )
+        conn.execute(text("DROP TABLE staff"))
+        conn.execute(text("ALTER TABLE staff_new RENAME TO staff"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_staff_user_id ON staff (user_id)"))
 
 
 def init_db() -> None:
@@ -149,7 +213,8 @@ def init_db() -> None:
 
     _migrate_prices_to_settlements()
     _migrate_entries_plot_name()
-    _migrate_staff_plot_name()
+    _drop_staff_plot_name()
+    _drop_staff_settlement_binding()
     Base.metadata.create_all(bind=engine)
 
 

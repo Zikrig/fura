@@ -5,11 +5,11 @@ class StaffAdd(StatesGroup):
     link = State()
     name = State()
     settlement = State()
-    plot = State()
 
 
 class StaffEdit(StatesGroup):
     value = State()
+    settlements = State()
 
 
 class SettlementFlow(StatesGroup):
@@ -29,6 +29,7 @@ class EntryFlow(StatesGroup):
     photo = State()
     vehicle = State()
     settlement = State()
+    plot = State()
 
 
 class ResultsFlow(StatesGroup):
