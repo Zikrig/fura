@@ -29,6 +29,7 @@ MAX-бот контроля проезда автомобилей (въезд н
 ## Инварианты MAX
 
 - После `message.edit` подтверждать callback через `send_callback_ack` (`message=None` + notification `" "`).
+- Текст пользователя (участок и т.п.) не редактировать: PUT отвечает `success=false` без исключения, и кажется, что бот молчит. Ответ — новым сообщением. `edit_or_answer` редактирует только callback.
 - Снимать клавиатуру через `attachments=[]`, не `None`.
 - Специфичные роутеры подключать раньше catch-all `menu`.
 - API base: `platform-api2.max.ru` (`apply_max_api_url`).

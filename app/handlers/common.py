@@ -31,10 +31,17 @@ async def clear_ctx(context: MemoryContext | None) -> None:
 async def edit_or_answer(event, text: str, kb: InlineKeyboardBuilder | None = None) -> None:
     attachments = [kb.as_markup()] if kb is not None else []
     message = getattr(event, "message", None)
-    if message is not None and getattr(message, "body", None) is not None:
+    # Чужое сообщение (текст участка и т.п.) бот не редактирует: API отвечает
+    # success=false без исключения, и пользователь не видит ответа.
+    if (
+        isinstance(event, MessageCallback)
+        and message is not None
+        and getattr(message, "body", None) is not None
+    ):
         try:
-            await message.edit(text=text, attachments=attachments if attachments else [])
-            return
+            edited = await message.edit(text=text, attachments=attachments if attachments else [])
+            if edited is not None and getattr(edited, "success", False):
+                return
         except Exception:
             pass
     if message is not None:
