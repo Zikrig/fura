@@ -50,15 +50,14 @@ def export_results_xlsx(
 
     for row_idx, entry in enumerate(entries, start=2):
         dt = entry.created_at
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
-        local = dt.astimezone(tz)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(tz)
         sett = entry.settlement.name if entry.settlement else ""
         plot_name = entry.plot_name or ""
         vehicle_name = entry.vehicle.name if entry.vehicle else ""
 
-        ws.cell(row_idx, 1, local.strftime("%d.%m.%Y"))
-        ws.cell(row_idx, 2, local.strftime("%H:%M:%S"))
+        ws.cell(row_idx, 1, dt.strftime("%d.%m.%Y"))
+        ws.cell(row_idx, 2, dt.strftime("%H:%M:%S"))
         ws.cell(row_idx, 3, sett)
         ws.cell(row_idx, 4, plot_name)
         ws.cell(row_idx, 5, vehicle_name)

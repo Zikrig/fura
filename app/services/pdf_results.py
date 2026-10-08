@@ -128,14 +128,13 @@ def _fit(text: str, width_mm: float) -> str:
 
 def _row_values(entry: Entry, tz: ZoneInfo) -> list[str]:
     dt = entry.created_at
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
-    local = dt.astimezone(tz)
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(tz)
     amount = entry.price_amount
     amount_text = str(int(amount)) if float(amount).is_integer() else f"{amount:.2f}"
     return [
-        local.strftime("%d.%m.%Y"),
-        local.strftime("%H:%M:%S"),
+        dt.strftime("%d.%m.%Y"),
+        dt.strftime("%H:%M:%S"),
         entry.settlement.name if entry.settlement else "",
         entry.plot_name or "",
         entry.vehicle.name if entry.vehicle else "",
