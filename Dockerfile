@@ -14,18 +14,22 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+ENV TZ=Europe/Moscow \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates curl tzdata \
     && curl -fsSL https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt \
         -o /usr/local/share/ca-certificates/russian_trusted_root_ca.crt \
     && curl -fsSL https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt \
         -o /usr/local/share/ca-certificates/russian_trusted_sub_ca.crt \
     && update-ca-certificates \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo "$TZ" > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
-
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
