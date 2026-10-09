@@ -8,9 +8,10 @@ from zoneinfo import ZoneInfo
 
 from fpdf import FPDF
 from PIL import Image as PILImage
+from PIL import ImageOps
 
 from app.db.models import Entry
-from app.services.excel_results import _resolve_photo
+from app.services.excel_results import _EMBED_MAX, _resolve_photo
 
 logger = logging.getLogger("fura_ochrana")
 
@@ -146,9 +147,11 @@ def _jpeg_bytes(stored: str) -> bytes | None:
     path = _resolve_photo(stored)
     if path is None:
         return None
-    image = PILImage.open(path)
-    image = image.convert("RGB")
-    image.thumbnail((640, 480))
+    image = ImageOps.exif_transpose(PILImage.open(path))
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    if max(image.size) > _EMBED_MAX:
+        image.thumbnail((_EMBED_MAX, _EMBED_MAX), PILImage.Resampling.LANCZOS)
     buf = BytesIO()
-    image.save(buf, format="JPEG", quality=80)
+    image.save(buf, format="JPEG", quality=92, optimize=True, subsampling=0)
     return buf.getvalue()

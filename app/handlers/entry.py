@@ -13,32 +13,69 @@ from app.db.database import session_scope
 from app.db.repo import Repo
 from app.handlers.common import ack, clear_ctx, edit_or_answer, role_for
 from app.keyboards.menus import back_row, entry_vehicle_keyboard, settlements_pick_keyboard
-from app.services.access import can_use_bot
+from app.services.access import Role, can_use_bot
 from app.services.media import download_to_photos, first_image_url_from_message_body
 from app.states import EntryFlow
 
 router = Router("entry")
 
 
-def _plot_keyboard() -> InlineKeyboardBuilder:
+def _plot_keyboard(back_payload: str = "entry:back_settlement") -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.row(*back_row("entry:back_settlement"))
+    kb.row(*back_row(back_payload))
     return kb
 
 
-async def _ask_plot(event, context: MemoryContext, *, settlement_id: int) -> None:
-    await context.update_data(settlement_id=settlement_id)
+def _settlements_for(repo: Repo, user_id: int, role: Role) -> list:
+    if role != Role.GUARD:
+        return repo.list_settlements()
+    staff = repo.get_staff(user_id, with_settlements=True)
+    if not staff:
+        return []
+    return list(staff.settlements)
+
+
+async def _ask_plot(
+    event,
+    context: MemoryContext,
+    *,
+    settlement_id: int,
+    back_payload: str,
+) -> None:
+    await context.update_data(settlement_id=settlement_id, settlement_back=back_payload)
     await context.set_state(EntryFlow.plot)
-    await edit_or_answer(event, "Введите участок:", _plot_keyboard())
+    await edit_or_answer(event, "Введите участок:", _plot_keyboard(back_payload))
+
+
+async def _show_entry_vehicles(event: MessageCallback, context: MemoryContext) -> None:
+    await context.set_state(EntryFlow.vehicle)
+    with session_scope() as session:
+        vehicles = Repo(session).list_vehicles()
+    await edit_or_answer(event, "Выберите тип авто:", entry_vehicle_keyboard(vehicles, 0))
 
 
 async def _show_entry_settlements(event: MessageCallback, context: MemoryContext, page: int) -> None:
+    user_id = event.callback.user.user_id
+    role = role_for(user_id)
     with session_scope() as session:
-        items = Repo(session).list_settlements()
+        items = _settlements_for(Repo(session), user_id, role)
+    if role == Role.GUARD and len(items) == 1:
+        await _ask_plot(
+            event,
+            context,
+            settlement_id=items[0].id,
+            back_payload="entry:back_vehicle",
+        )
+        return
     if not items:
+        text = (
+            "Вам не назначены поселки. Обратитесь к администратору."
+            if role == Role.GUARD
+            else "Сначала добавьте поселки."
+        )
         await edit_or_answer(
             event,
-            "Сначала добавьте поселки.",
+            text,
             InlineKeyboardBuilder().row(*back_row("menu:main")),
         )
         await clear_ctx(context)
@@ -124,15 +161,20 @@ async def entry_pick_vehicle(event: MessageCallback, context: MemoryContext):
 @router.message_callback(EntryFlow.plot, F.callback.payload == "entry:back_vehicle")
 async def entry_back_vehicle(event: MessageCallback, context: MemoryContext):
     await ack(event)
-    await context.set_state(EntryFlow.vehicle)
-    with session_scope() as session:
-        vehicles = Repo(session).list_vehicles()
-    await edit_or_answer(event, "Выберите тип авто:", entry_vehicle_keyboard(vehicles, 0))
+    await _show_entry_vehicles(event, context)
 
 
 @router.message_callback(EntryFlow.plot, F.callback.payload == "entry:back_settlement")
 async def entry_back_settlement(event: MessageCallback, context: MemoryContext):
     await ack(event)
+    user_id = event.callback.user.user_id
+    role = role_for(user_id)
+    if role == Role.GUARD:
+        with session_scope() as session:
+            assigned = _settlements_for(Repo(session), user_id, role)
+        if len(assigned) <= 1:
+            await _show_entry_vehicles(event, context)
+            return
     await _show_entry_settlements(event, context, 0)
 
 
@@ -147,17 +189,29 @@ async def entry_sett_page(event: MessageCallback, context: MemoryContext):
 async def entry_pick_settlement(event: MessageCallback, context: MemoryContext):
     await ack(event)
     settlement_id = int(event.callback.payload.split(":")[-1])
-    await _ask_plot(event, context, settlement_id=settlement_id)
+    user_id = event.callback.user.user_id
+    role = role_for(user_id)
+    with session_scope() as session:
+        allowed = {item.id for item in _settlements_for(Repo(session), user_id, role)}
+    if settlement_id not in allowed:
+        await edit_or_answer(event, "Этот поселок вам не назначен.", _plot_keyboard("entry:back_vehicle"))
+        return
+    await _ask_plot(
+        event,
+        context,
+        settlement_id=settlement_id,
+        back_payload="entry:back_settlement",
+    )
 
 
 @router.message_created(EntryFlow.plot)
 async def entry_plot(event: MessageCreated, context: MemoryContext):
     plot_name = ((event.message.body.text if event.message.body else "") or "").strip()
-    kb = _plot_keyboard()
+    data = await context.get_data()
+    kb = _plot_keyboard(data.get("settlement_back") or "entry:back_settlement")
     if not plot_name:
         await event.message.answer("Участок пустой.", attachments=[kb.as_markup()])
         return
-    data = await context.get_data()
     settlement_id = data.get("settlement_id")
     vehicle_id = data.get("vehicle_id")
     if not settlement_id or not vehicle_id:
@@ -192,9 +246,19 @@ async def _finish_entry(
         await clear_ctx(context)
         return
 
+    role = role_for(user_id)
     now = datetime.now(ZoneInfo(settings.TIMEZONE)).replace(tzinfo=None)
     with session_scope() as session:
         repo = Repo(session)
+        allowed = {item.id for item in _settlements_for(repo, user_id, role)}
+        if settlement_id not in allowed:
+            await edit_or_answer(
+                event,
+                "Этот поселок вам не назначен.",
+                InlineKeyboardBuilder().row(*back_row("menu:main")),
+            )
+            await clear_ctx(context)
+            return
         price = repo.get_price(vehicle_id, settlement_id)
         amount = price.amount if price else 0.0
         vehicle = repo.get_vehicle(vehicle_id)

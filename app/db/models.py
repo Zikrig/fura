@@ -47,7 +47,7 @@ class Vehicle(Base):
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
 
     prices: Mapped[list[Price]] = relationship(back_populates="vehicle", cascade="all, delete-orphan")
-    entries: Mapped[list[Entry]] = relationship(back_populates="vehicle")
+    entries: Mapped[list[Entry]] = relationship(back_populates="vehicle", passive_deletes=True)
 
 
 class Price(Base):

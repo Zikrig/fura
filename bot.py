@@ -12,6 +12,7 @@ from app.config import settings
 from app.db.database import init_db
 from app.handlers import setup_routers
 from app.max_api_url import apply_max_api_url
+from app.services.photo_cleanup import purge_old_photos
 
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
@@ -60,13 +61,28 @@ async def main() -> None:
     )
     logger.info("Webhook subscribed: %s", settings.WEBHOOK_PUBLIC_URL)
 
-    await dp.handle_webhook(
-        bot,
-        host=settings.WEBHOOK_HOST,
-        port=settings.WEBHOOK_PORT,
-        path=settings.WEBHOOK_PATH,
-        secret=settings.WEBHOOK_SECRET,
-    )
+    cleanup = asyncio.create_task(_photo_cleanup_loop(logger))
+    try:
+        await dp.handle_webhook(
+            bot,
+            host=settings.WEBHOOK_HOST,
+            port=settings.WEBHOOK_PORT,
+            path=settings.WEBHOOK_PATH,
+            secret=settings.WEBHOOK_SECRET,
+        )
+    finally:
+        cleanup.cancel()
+
+
+async def _photo_cleanup_loop(logger: logging.Logger) -> None:
+    while True:
+        try:
+            removed = await asyncio.to_thread(purge_old_photos)
+            if removed:
+                logger.info("Удалено фото старше 30 дней: %s", removed)
+        except Exception:
+            logger.exception("Не удалось удалить старые фото")
+        await asyncio.sleep(24 * 60 * 60)
 
 
 if __name__ == "__main__":

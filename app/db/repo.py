@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, joinedload
 
+from app.config import settings
 from app.db.models import Entry, Price, Settlement, Staff, Vehicle, staff_settlements
 
 
@@ -175,8 +177,14 @@ class Repo:
         row = self.get_vehicle(vehicle_id)
         if not row:
             return False
+        photos = list(
+            self.session.scalars(select(Entry.photo_path).where(Entry.vehicle_id == vehicle_id))
+        )
+        self.session.execute(delete(Entry).where(Entry.vehicle_id == vehicle_id))
         self.session.delete(row)
         self.session.flush()
+        for stored in photos:
+            _unlink_entry_photo(stored)
         return True
 
     def ensure_vehicle(self, name: str) -> Vehicle:
@@ -256,3 +264,40 @@ class Repo:
         if settlement_id is not None:
             stmt = stmt.where(Entry.settlement_id == settlement_id)
         return list(self.session.scalars(stmt).unique())
+
+    def take_expired_photo_paths(self, older_than: datetime) -> list[str]:
+        rows = list(
+            self.session.scalars(
+                select(Entry).where(Entry.created_at < older_than, Entry.photo_path != "")
+            )
+        )
+        paths = [row.photo_path for row in rows if row.photo_path]
+        for row in rows:
+            row.photo_path = ""
+        if paths:
+            self.session.flush()
+        return paths
+
+    def live_photo_names(self) -> set[str]:
+        names: set[str] = set()
+        for stored in self.session.scalars(select(Entry.photo_path).where(Entry.photo_path != "")):
+            name = Path(stored or "").name
+            if name:
+                names.add(name)
+        return names
+
+
+def _unlink_entry_photo(stored: str) -> None:
+    raw = Path(stored or "")
+    paths: list[Path] = []
+    if raw.is_file():
+        paths.append(raw)
+    if raw.name:
+        named = settings.photos_dir / raw.name
+        if named.is_file() and named not in paths:
+            paths.append(named)
+    for path in paths:
+        try:
+            path.unlink()
+        except OSError:
+            pass

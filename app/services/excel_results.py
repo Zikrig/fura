@@ -13,6 +13,7 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Font, PatternFill
 from PIL import Image as PILImage
+from PIL import ImageOps
 
 from app.config import settings
 from app.db.models import Entry
@@ -118,32 +119,65 @@ def _resolve_photo(stored: str) -> Path | None:
     return None
 
 
-class _PngImage(XLImage):
+_EMBED_MAX = 2000
+_DISPLAY_MAX_W = 420
+_DISPLAY_MAX_H = 320
+
+
+class _BlobImage(XLImage):
     """openpyxl 3.1.5 читает jpeg через img.fp, Pillow 11 отдаёт пустые байты — картинки в xlsx нет."""
 
-    def __init__(self, image: PILImage.Image):
-        super().__init__(image)
-        self.format = "png"
+    def __init__(self, blob: bytes, fmt: str, display: tuple[int, int]):
+        super().__init__(BytesIO(blob))
+        self.format = fmt
+        self._blob = blob
+        self.width, self.height = display
 
     def _data(self) -> bytes:
-        image = self.ref
-        if not isinstance(image, PILImage.Image):
-            image = PILImage.open(image)
-        if image.mode not in ("RGB", "RGBA"):
-            image = image.convert("RGB")
+        return self._blob
+
+
+def _orientation_applied(image: PILImage.Image) -> bool:
+    try:
+        orientation = image.getexif().get(274)
+    except Exception:
+        return False
+    return orientation not in (None, 1)
+
+
+def _encode_photo(image: PILImage.Image) -> tuple[bytes, str]:
+    if image.mode == "RGBA":
         buf = BytesIO()
         image.save(buf, format="PNG")
-        return buf.getvalue()
+        return buf.getvalue(), "png"
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    buf = BytesIO()
+    image.save(buf, format="JPEG", quality=92, optimize=True, subsampling=0)
+    return buf.getvalue(), "jpeg"
 
 
-def _excel_image(src: Path) -> tuple[_PngImage, float]:
-    image = PILImage.open(src)
-    image = image.convert("RGB")
-    image.thumbnail((240, 180))
-    img = _PngImage(image)
-    img.width = image.width
-    img.height = image.height
-    height_pt = max(72, image.height * 0.75 + 6)
+def _excel_image(src: Path) -> tuple[_BlobImage, float]:
+    raw = PILImage.open(src)
+    oriented = ImageOps.exif_transpose(raw)
+    must_encode = _orientation_applied(raw) or raw.format not in ("JPEG", "PNG")
+    if not must_encode and max(oriented.size) <= _EMBED_MAX:
+        blob = src.read_bytes()
+        fmt = "jpeg" if raw.format == "JPEG" else "png"
+        pixel_w, pixel_h = oriented.size
+    else:
+        image = oriented
+        if max(image.size) > _EMBED_MAX:
+            image = image.copy()
+            image.thumbnail((_EMBED_MAX, _EMBED_MAX), PILImage.Resampling.LANCZOS)
+        blob, fmt = _encode_photo(image)
+        pixel_w, pixel_h = image.size
+
+    scale = min(_DISPLAY_MAX_W / pixel_w, _DISPLAY_MAX_H / pixel_h, 1.0)
+    disp_w = max(1, int(pixel_w * scale))
+    disp_h = max(1, int(pixel_h * scale))
+    img = _BlobImage(blob, fmt, (disp_w, disp_h))
+    height_pt = max(72, disp_h * 0.75 + 6)
     return img, height_pt
 
 
