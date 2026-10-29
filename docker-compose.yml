@@ -17,3 +17,8 @@ services:
     dns:
       - 8.8.8.8
       - 1.1.1.1
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

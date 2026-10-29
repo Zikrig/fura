@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from maxapi.context.context import MemoryContext
 from maxapi.types import MessageCallback
 from maxapi.types.input_media import InputMedia
@@ -85,11 +87,15 @@ async def show_main_menu(event, user_id: int, context: MemoryContext | None = No
 
 
 async def send_file_to_user(bot, user_id: int, path, caption: str = "") -> None:
-    await bot.send_message(
-        user_id=user_id,
-        text=caption or "Файл",
-        attachments=[InputMedia(str(path))],
-    )
+    file_path = Path(path)
+    try:
+        await bot.send_message(
+            user_id=user_id,
+            text=caption or "Файл",
+            attachments=[InputMedia(str(file_path))],
+        )
+    finally:
+        file_path.unlink(missing_ok=True)
 
 
 def staff_card_text(staff) -> str:

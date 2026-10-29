@@ -43,3 +43,21 @@ def purge_old_photos(now: datetime | None = None) -> int:
         except OSError:
             logger.exception("Не удалось удалить старое фото %s", path)
     return removed
+
+
+def purge_old_exports(max_age: timedelta = timedelta(days=1)) -> int:
+    """Старые выгрузки results_*.xlsx. prices.xlsx не трогает."""
+    directory = settings.exports_dir
+    if not directory.is_dir():
+        return 0
+    deadline = time.time() - max_age.total_seconds()
+    removed = 0
+    for path in directory.glob("results_*.xlsx"):
+        try:
+            if path.stat().st_mtime >= deadline:
+                continue
+            path.unlink()
+            removed += 1
+        except OSError:
+            logger.exception("Не удалось удалить выгрузку %s", path)
+    return removed
